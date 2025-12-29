@@ -45,8 +45,8 @@ const App = () => {
   const recognitionRef = useRef(null);
 
   useEffect(() => {
-    // Accessing SpeechRecognition directly from window with type casting to any to prevent TypeScript errors.
-    // Fix: Cast window to any to access SpeechRecognition or webkitSpeechRecognition which are not part of the standard Window interface in TypeScript.
+    // Pure JS way to access SpeechRecognition properties
+    // Added cast to any to resolve TypeScript 'Property does not exist on type Window' errors for experimental/prefixed APIs
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
@@ -74,16 +74,11 @@ const App = () => {
       const selectedTone = TONES.find(t => t.name === tone) || TONES[0];
       const targetLangName = SUPPORTED_LANGUAGES.find(l => l.code === targetLang)?.name || 'the target language';
       
-      const prompt = `Translate the following text into ${targetLangName}.
-      Tone requirements: ${selectedTone.prompt}
+      const prompt = `Translate this text into ${targetLangName}.
+      Tone: ${selectedTone.prompt}
+      Important: Return ONLY the translated string. Do not repeat the input or add notes.
       
-      CRITICAL INSTRUCTIONS:
-      1. Return ONLY the translated text.
-      2. DO NOT include the original text in your response.
-      3. DO NOT provide explanations, metadata, or greetings.
-      
-      TEXT TO TRANSLATE:
-      ${sourceText}`;
+      Input: "${sourceText}"`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -91,11 +86,11 @@ const App = () => {
       });
 
       const outputText = response.text || '';
-      if (!outputText) throw new Error("No response");
+      if (!outputText) throw new Error("Translation failed");
       setTranslatedText(outputText.trim());
     } catch (err) {
-      console.error("Translation failed:", err);
-      setError("AI Translation failed. Please check your API key and network connection.");
+      console.error(err);
+      setError("AI Translation error. Check your API key or connection.");
     } finally {
       setLoading(false);
     }
@@ -109,7 +104,7 @@ const App = () => {
         recognitionRef.current?.start();
         setIsRecording(true);
       } catch (e) {
-        alert("Speech recognition failed or is not supported in this browser.");
+        alert("Speech input not available in this browser.");
       }
     }
   };
@@ -127,14 +122,12 @@ const App = () => {
         const result = await mammoth.extractRawText({ arrayBuffer });
         setSourceText(result.value || '');
       } else if (extension === 'txt') {
-        const text = await file.text();
-        setSourceText(text || '');
+        setSourceText(await file.text());
       } else {
-        setError("Format not supported. Please use .docx or .txt files.");
+        setError("Please use .txt or .docx files.");
       }
     } catch (err) { 
-      console.error(err);
-      setError("Failed to read the document.");
+      setError("Error reading file.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -157,11 +150,9 @@ const App = () => {
           </div>
           <h1 className="brand-font text-xl text-slate-900 font-extrabold">TransPro <span className="text-indigo-600">AI</span></h1>
         </div>
-        <div className="flex items-center gap-2">
-            <div className="px-3 py-1 bg-green-50 text-green-600 rounded-full border border-green-100 flex items-center gap-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-[10px] font-bold uppercase tracking-widest">Active Engine</span>
-            </div>
+        <div className="px-3 py-1 bg-green-50 text-green-600 rounded-full border border-green-100 flex items-center gap-2">
+          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+          <span className="text-[10px] font-bold uppercase tracking-widest">Active Engine</span>
         </div>
       </nav>
 
@@ -169,7 +160,7 @@ const App = () => {
         <div className="glass p-4 rounded-3xl flex flex-wrap items-center gap-4 shadow-sm border border-white">
           <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-2xl border">
             <select value={sourceLang} onChange={e => setSourceLang(e.target.value)} className="bg-transparent text-sm font-bold px-3 py-1 outline-none cursor-pointer">
-              <option value="auto">Detect Language</option>
+              <option value="auto">Auto Detect</option>
               {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
             </select>
             <div className="px-1 text-slate-300"><ArrowRightLeft size={14}/></div>
@@ -187,7 +178,7 @@ const App = () => {
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-center gap-3 text-red-600 text-sm font-medium animate-in fade-in slide-in-from-top-1">
+          <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-center gap-3 text-red-600 text-sm font-medium">
             <AlertCircle size={18} /> {error}
           </div>
         )}
@@ -195,14 +186,14 @@ const App = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1">
           <div className="flex flex-col bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden min-h-[450px]">
             <div className="p-5 border-b flex items-center justify-between bg-slate-50/50">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Globe size={14}/> Input Source</span>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Globe size={14}/> Source</span>
               <button onClick={() => { setSourceText(''); setTranslatedText(''); }} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
             </div>
             <textarea 
               value={sourceText} 
               onChange={e => setSourceText(e.target.value)} 
               placeholder="Paste text or import a document..." 
-              className="flex-1 p-8 text-xl text-slate-700 outline-none resize-none editor-grid leading-relaxed placeholder:text-slate-200"
+              className="flex-1 p-8 text-xl text-slate-700 outline-none resize-none editor-grid leading-relaxed"
             />
             <div className="p-4 border-t flex gap-2">
               <button onClick={() => speak(sourceText, sourceLang)} className="p-3 bg-slate-50 text-slate-400 rounded-2xl hover:text-indigo-600 transition-colors" disabled={!sourceText}><Volume2 size={22}/></button>
@@ -214,11 +205,11 @@ const App = () => {
 
           <div className="flex flex-col bg-slate-900 rounded-[2rem] shadow-2xl overflow-hidden min-h-[450px]">
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Sparkles size={14} className="text-indigo-400"/> AI Result</span>
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Sparkles size={14} className="text-indigo-400"/> Translation</span>
               {loading && <Loader2 size={18} className="text-indigo-400 animate-spin"/>}
             </div>
             <div className="flex-1 p-8 text-xl text-indigo-50 leading-relaxed whitespace-pre-wrap overflow-y-auto break-words font-medium">
-              {translatedText || <p className="text-slate-700 italic font-normal">Translation will appear here...</p>}
+              {translatedText || <p className="text-slate-700 italic font-normal">Waiting for input...</p>}
             </div>
             <div className="p-5 bg-slate-800/40 border-t border-slate-800 flex items-center justify-between">
               <div className="flex gap-2">
@@ -230,7 +221,7 @@ const App = () => {
               <button 
                 onClick={handleTranslate} 
                 disabled={loading || !sourceText} 
-                className="px-10 py-4 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-black rounded-2xl shadow-xl flex items-center gap-3 transition-all active:scale-95 disabled:opacity-50"
+                className="px-10 py-4 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-black rounded-2xl shadow-xl flex items-center gap-3 active:scale-95 disabled:opacity-50"
               >
                 {loading ? 'PROCESSING...' : 'TRANSLATE'} <ChevronRight size={20} />
               </button>
@@ -239,14 +230,11 @@ const App = () => {
         </div>
       </main>
       <footer className="p-4 text-center border-t bg-white">
-          <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Enterprise Doc Trans Pro • Secure Browser-Only Session</p>
+          <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest tracking-widest">Enterprise Doc Trans Pro • Secure Browser Session</p>
       </footer>
     </div>
   );
 };
 
-const rootElement = document.getElementById('root');
-if (rootElement) {
-  const root = createRoot(rootElement);
-  root.render(<App />);
-}
+const root = createRoot(document.getElementById('root'));
+root.render(<App />);
