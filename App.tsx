@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   SUPPORTED_LANGUAGES, 
   TranslationHistoryItem 
@@ -20,8 +20,37 @@ import {
   ChevronRight,
   Clock,
   Languages,
-  PenTool
+  PenTool,
+  Upload,
+  FileUp,
+  AlertCircle,
+  MicOff,
+  Search
 } from 'lucide-react';
+import mammoth from 'mammoth';
+import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
+
+// Audio utility functions for Gemini Live API
+function encodeAudio(bytes: Uint8Array) {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function createAudioBlob(data: Float32Array) {
+  const l = data.length;
+  const int16 = new Int16Array(l);
+  for (let i = 0; i < l; i++) {
+    int16[i] = data[i] * 32768;
+  }
+  return {
+    data: encodeAudio(new Uint8Array(int16.buffer)),
+    mimeType: 'audio/pcm;rate=16000',
+  };
+}
 
 const App: React.FC = () => {
   const [sourceText, setSourceText] = useState('');
@@ -30,10 +59,22 @@ const App: React.FC = () => {
   const [targetLang, setTargetLang] = useState<string>('es');
   const [tone, setTone] = useState('Neutral');
   const [isTranslating, setIsTranslating] = useState(false);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [history, setHistory] = useState<TranslationHistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [copied, setCopied] = useState(false);
   const [detectedLang, setDetectedLang] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  
+  // Voice Input State
+  const [isRecording, setIsRecording] = useState(false);
+  const sessionRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const transcriptionRef = useRef('');
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('doctrans_history');
@@ -52,6 +93,11 @@ const App: React.FC = () => {
     return { words, readingTime };
   }, [sourceText]);
 
+  const detectedLangName = useMemo(() => {
+    if (!detectedLang) return null;
+    return SUPPORTED_LANGUAGES.find(l => l.code === detectedLang)?.name || detectedLang.toUpperCase();
+  }, [detectedLang]);
+
   const handleTranslate = useCallback(async () => {
     if (!sourceText.trim()) {
       setTranslatedText('');
@@ -66,6 +112,8 @@ const App: React.FC = () => {
         const detected = await detectLanguage(sourceText);
         setDetectedLang(detected);
         actualSourceLang = detected;
+      } else {
+        setDetectedLang(null);
       }
 
       const result = await translateText(sourceText, targetLang, actualSourceLang, tone);
@@ -90,10 +138,10 @@ const App: React.FC = () => {
   // Debounced translation
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (sourceText.length > 5) handleTranslate();
+      if (sourceText.length > 5 && !isRecording) handleTranslate();
     }, 1200);
     return () => clearTimeout(timer);
-  }, [sourceText, targetLang, tone]);
+  }, [sourceText, targetLang, tone, isRecording]);
 
   const swap = () => {
     const oldSource = sourceText;
@@ -105,6 +153,121 @@ const App: React.FC = () => {
     setTargetLang(oldS);
     setSourceText(oldTrans);
     setTranslatedText(oldSource);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessingFile(true);
+    setFileError(null);
+
+    try {
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      
+      if (extension === 'txt') {
+        const text = await file.text();
+        setSourceText(text);
+      } else if (extension === 'docx') {
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        setSourceText(result.value);
+      } else {
+        setFileError("Unsupported file format. Please upload .txt or .docx");
+      }
+    } catch (err) {
+      console.error("File processing error:", err);
+      setFileError("Error reading document. Please try again.");
+    } finally {
+      setIsProcessingFile(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // Live Transcription Implementation
+  const stopRecording = useCallback(() => {
+    if (sessionRef.current) {
+      try { sessionRef.current.close(); } catch(e) {}
+      sessionRef.current = null;
+    }
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    setIsRecording(false);
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    try {
+      setIsRecording(true);
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      audioContextRef.current = audioContext;
+
+      const sessionPromise = ai.live.connect({
+        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        config: {
+          responseModalities: [Modality.AUDIO],
+          inputAudioTranscription: {},
+          systemInstruction: "You are a transcription assistant. Your only task is to listen and let the system transcribe. Do not generate any audio response yourself."
+        },
+        callbacks: {
+          onopen: () => {
+            const source = audioContext.createMediaStreamSource(stream);
+            const scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+            processorRef.current = scriptProcessor;
+            
+            scriptProcessor.onaudioprocess = (e) => {
+              const inputData = e.inputBuffer.getChannelData(0);
+              const pcmBlob = createAudioBlob(inputData);
+              sessionPromise.then(session => {
+                session.sendRealtimeInput({ media: pcmBlob });
+              });
+            };
+            
+            source.connect(scriptProcessor);
+            scriptProcessor.connect(audioContext.destination);
+          },
+          onmessage: async (message: LiveServerMessage) => {
+            if (message.serverContent?.inputTranscription) {
+              const newText = message.serverContent.inputTranscription.text;
+              transcriptionRef.current += " " + newText;
+              setSourceText(prev => (prev.trim() + " " + newText).trim());
+            }
+          },
+          onerror: (e) => {
+            console.error("Live API Error:", e);
+            stopRecording();
+          },
+          onclose: () => {
+            stopRecording();
+          }
+        }
+      });
+      sessionRef.current = await sessionPromise;
+    } catch (err) {
+      console.error("Failed to start voice input:", err);
+      setIsRecording(false);
+    }
+  }, [stopRecording]);
+
+  const toggleVoiceInput = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
   };
 
   return (
@@ -144,17 +307,27 @@ const App: React.FC = () => {
           {/* Controls Panel */}
           <div className="glass-panel pro-shadow rounded-2xl p-4 flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2 bg-slate-100/50 p-1 rounded-xl">
-              <select 
-                value={sourceLang}
-                onChange={(e) => setSourceLang(e.target.value)}
-                className="bg-transparent border-none text-sm font-semibold text-slate-700 px-3 py-2 outline-none"
-              >
-                <option value="auto">Auto Detect</option>
-                {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
-              </select>
+              <div className="flex items-center relative">
+                <select 
+                  value={sourceLang}
+                  onChange={(e) => setSourceLang(e.target.value)}
+                  className="bg-transparent border-none text-sm font-semibold text-slate-700 px-3 py-2 outline-none"
+                >
+                  <option value="auto">Auto Detect</option>
+                  {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+                </select>
+                
+                {sourceLang === 'auto' && detectedLangName && (
+                  <div className="absolute -top-6 left-3 animate-in flex items-center gap-1 bg-indigo-100 text-indigo-700 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-tighter">
+                    <Search size={8} /> Detected: {detectedLangName}
+                  </div>
+                )}
+              </div>
+
               <button onClick={swap} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-all shadow-sm">
                 <ArrowRightLeft size={16} />
               </button>
+              
               <select 
                 value={targetLang}
                 onChange={(e) => setTargetLang(e.target.value)}
@@ -186,7 +359,28 @@ const App: React.FC = () => {
                 AI PROCESSING
               </div>
             )}
+            
+            {isProcessingFile && (
+              <div className="flex items-center gap-2 text-amber-500 text-xs font-bold bg-amber-50 px-3 py-1.5 rounded-full">
+                <Loader2 size={12} className="animate-spin" />
+                EXTRACTING DOC
+              </div>
+            )}
+
+            {isRecording && (
+              <div className="flex items-center gap-2 text-red-500 text-xs font-bold bg-red-50 px-3 py-1.5 rounded-full animate-pulse">
+                <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                VOICE TYPING ACTIVE
+              </div>
+            )}
           </div>
+
+          {fileError && (
+            <div className="bg-red-50 text-red-600 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 animate-in border border-red-100">
+              <AlertCircle size={14} /> {fileError}
+              <button onClick={() => setFileError(null)} className="ml-auto hover:text-red-800">×</button>
+            </div>
+          )}
 
           {/* Document Panes */}
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 min-h-[500px]">
@@ -194,13 +388,23 @@ const App: React.FC = () => {
             <div className="flex flex-col glass-panel pro-shadow rounded-3xl overflow-hidden border-2 border-transparent focus-within:border-indigo-100 transition-all">
               <div className="bg-white/50 border-b border-slate-100 px-6 py-3 flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Source Document</span>
-                <div className="flex gap-4">
+                <div className="flex items-center gap-4">
                   <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase">
                     <FileText size={12} /> {stats.words} Words
                   </div>
-                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase">
-                    <Clock size={12} /> {stats.readingTime}m Read
-                  </div>
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[10px] font-black px-2 py-1 rounded transition-colors uppercase tracking-tight"
+                  >
+                    <FileUp size={12} /> Import Doc
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    className="hidden" 
+                    accept=".txt,.docx"
+                    onChange={handleFileUpload} 
+                  />
                 </div>
               </div>
               <textarea
@@ -213,11 +417,16 @@ const App: React.FC = () => {
                 <button 
                   onClick={() => speakText(sourceText)}
                   className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                  title="Speak Source"
                 >
                   <Volume2 size={20} />
                 </button>
-                <button className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all">
-                  <Mic size={20} />
+                <button 
+                  onClick={toggleVoiceInput}
+                  className={`p-2 rounded-xl transition-all ${isRecording ? 'text-red-600 bg-red-50 shadow-inner' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                  title={isRecording ? "Stop Recording" : "Start Voice Input"}
+                >
+                  {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
                 </button>
               </div>
             </div>
@@ -240,6 +449,7 @@ const App: React.FC = () => {
                   onClick={() => speakText(translatedText)}
                   className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
                   disabled={!translatedText}
+                  title="Speak Translation"
                 >
                   <Volume2 size={20} />
                 </button>
@@ -251,6 +461,7 @@ const App: React.FC = () => {
                   }}
                   className={`p-2 rounded-xl transition-all ${copied ? 'text-green-600 bg-green-50' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
                   disabled={!translatedText}
+                  title="Copy to Clipboard"
                 >
                   {copied ? <Check size={20} /> : <Copy size={20} />}
                 </button>
