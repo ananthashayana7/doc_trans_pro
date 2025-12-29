@@ -1,16 +1,13 @@
 
 import { GoogleGenAI, Modality } from "@google/genai";
 
-// Ensure we initialize exactly as required by the docs
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 export async function translateText(
   text: string, 
   targetLang: string, 
   sourceLang: string = 'auto',
   tone: string = 'Neutral'
 ): Promise<string> {
-  const ai = getAI();
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const model = 'gemini-3-flash-preview';
   const prompt = `Translate the following text to ${targetLang}. 
   Source Language: ${sourceLang === 'auto' ? 'detect automatically' : sourceLang}
@@ -32,7 +29,7 @@ export async function translateText(
 }
 
 export async function detectLanguage(text: string): Promise<string> {
-  const ai = getAI();
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const model = 'gemini-3-flash-preview';
   const prompt = `Identify the 2-letter ISO language code for this text. Only return the code (e.g., 'en', 'fr').
   
@@ -77,7 +74,7 @@ async function decodeAudioData(
 
 export async function speakText(text: string, voiceName: string = 'Kore'): Promise<void> {
   if (!text) return;
-  const ai = getAI();
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   try {
     const response = await ai.models.generateContent({
