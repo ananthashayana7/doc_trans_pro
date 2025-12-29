@@ -15,6 +15,7 @@
             font-family: 'Inter', sans-serif;
             background-color: #f8fafc;
             color: #1e293b;
+            margin: 0;
         }
         .brand-font { font-family: 'Plus Jakarta Sans', sans-serif; }
         .glass {
@@ -26,7 +27,6 @@
             background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
             background-size: 24px 24px;
         }
-        /* Custom scrollbar for better aesthetics */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
@@ -49,6 +49,7 @@
 </head>
 <body>
     <div id="root"></div>
-    <script type="text/babel" data-presets="typescript,react" data-type="module" src="index.tsx"></script>
+    <!-- Using react preset for Babel to ensure maximum compatibility -->
+    <script type="text/babel" data-presets="react" data-type="module" src="index.tsx"></script>
 </body>
 </html>
