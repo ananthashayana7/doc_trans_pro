@@ -3,8 +3,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   SUPPORTED_LANGUAGES, 
   TranslationHistoryItem 
-} from './types';
-import { translateText, detectLanguage, speakText } from './services/geminiService';
+} from './types.ts';
+import { translateText, detectLanguage, speakText } from './services/geminiService.ts';
 import { 
   ArrowRightLeft, 
   Volume2, 
@@ -16,7 +16,6 @@ import {
   Mic,
   Loader2,
   Sparkles,
-  Settings,
   ChevronRight,
   Clock,
   Languages,
