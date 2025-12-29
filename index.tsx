@@ -45,7 +45,8 @@ const App = () => {
   const recognitionRef = useRef(null);
 
   useEffect(() => {
-    // Cast window to any to access Web Speech API properties that are missing from default TypeScript window interface
+    // Accessing SpeechRecognition directly from window with type casting to any to prevent TypeScript errors.
+    // Fix: Cast window to any to access SpeechRecognition or webkitSpeechRecognition which are not part of the standard Window interface in TypeScript.
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
@@ -75,9 +76,13 @@ const App = () => {
       
       const prompt = `Translate the following text into ${targetLangName}.
       Tone requirements: ${selectedTone.prompt}
-      Important: Return ONLY the translated text. Do not repeat the source text. Do not provide notes.
       
-      SOURCE TEXT TO TRANSLATE:
+      CRITICAL INSTRUCTIONS:
+      1. Return ONLY the translated text.
+      2. DO NOT include the original text in your response.
+      3. DO NOT provide explanations, metadata, or greetings.
+      
+      TEXT TO TRANSLATE:
       ${sourceText}`;
 
       const response = await ai.models.generateContent({
@@ -90,7 +95,7 @@ const App = () => {
       setTranslatedText(outputText.trim());
     } catch (err) {
       console.error("Translation failed:", err);
-      setError("AI Engine error. Please ensure your API key is correct and valid.");
+      setError("AI Translation failed. Please check your API key and network connection.");
     } finally {
       setLoading(false);
     }
@@ -104,7 +109,7 @@ const App = () => {
         recognitionRef.current?.start();
         setIsRecording(true);
       } catch (e) {
-        alert("Speech recognition failed or is not supported.");
+        alert("Speech recognition failed or is not supported in this browser.");
       }
     }
   };
@@ -125,11 +130,11 @@ const App = () => {
         const text = await file.text();
         setSourceText(text || '');
       } else {
-        setError("Only .docx and .txt files are supported. Please convert your file.");
+        setError("Format not supported. Please use .docx or .txt files.");
       }
     } catch (err) { 
       console.error(err);
-      setError("Failed to read document.");
+      setError("Failed to read the document.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -155,7 +160,7 @@ const App = () => {
         <div className="flex items-center gap-2">
             <div className="px-3 py-1 bg-green-50 text-green-600 rounded-full border border-green-100 flex items-center gap-2">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-[10px] font-bold uppercase tracking-widest">Live Engine</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest">Active Engine</span>
             </div>
         </div>
       </nav>
@@ -182,7 +187,7 @@ const App = () => {
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-center gap-3 text-red-600 text-sm font-medium animate-bounce">
+          <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-center gap-3 text-red-600 text-sm font-medium animate-in fade-in slide-in-from-top-1">
             <AlertCircle size={18} /> {error}
           </div>
         )}
@@ -190,13 +195,13 @@ const App = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1">
           <div className="flex flex-col bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden min-h-[450px]">
             <div className="p-5 border-b flex items-center justify-between bg-slate-50/50">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Globe size={14}/> Input</span>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Globe size={14}/> Input Source</span>
               <button onClick={() => { setSourceText(''); setTranslatedText(''); }} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
             </div>
             <textarea 
               value={sourceText} 
               onChange={e => setSourceText(e.target.value)} 
-              placeholder="Start typing or upload a document..." 
+              placeholder="Paste text or import a document..." 
               className="flex-1 p-8 text-xl text-slate-700 outline-none resize-none editor-grid leading-relaxed placeholder:text-slate-200"
             />
             <div className="p-4 border-t flex gap-2">
@@ -209,11 +214,11 @@ const App = () => {
 
           <div className="flex flex-col bg-slate-900 rounded-[2rem] shadow-2xl overflow-hidden min-h-[450px]">
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Sparkles size={14} className="text-indigo-400"/> Translation</span>
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Sparkles size={14} className="text-indigo-400"/> AI Result</span>
               {loading && <Loader2 size={18} className="text-indigo-400 animate-spin"/>}
             </div>
             <div className="flex-1 p-8 text-xl text-indigo-50 leading-relaxed whitespace-pre-wrap overflow-y-auto break-words font-medium">
-              {translatedText || <p className="text-slate-700 italic font-normal">Waiting for translation...</p>}
+              {translatedText || <p className="text-slate-700 italic font-normal">Translation will appear here...</p>}
             </div>
             <div className="p-5 bg-slate-800/40 border-t border-slate-800 flex items-center justify-between">
               <div className="flex gap-2">
@@ -234,7 +239,7 @@ const App = () => {
         </div>
       </main>
       <footer className="p-4 text-center border-t bg-white">
-          <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Doc Trans Pro • Secure Local Instance</p>
+          <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Enterprise Doc Trans Pro • Secure Browser-Only Session</p>
       </footer>
     </div>
   );
