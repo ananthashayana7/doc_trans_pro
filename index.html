@@ -26,6 +26,11 @@
             background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
             background-size: 24px 24px;
         }
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     </style>
 
     <script type="importmap">
@@ -44,7 +49,6 @@
 </head>
 <body>
     <div id="root"></div>
-    <!-- Removed TypeScript 'as' syntax in the source file, using standard React preset -->
-    <script type="text/babel" data-presets="react" data-type="module" src="index.tsx"></script>
+    <script type="text/babel" data-presets="typescript,react" data-type="module" src="index.tsx"></script>
 </body>
 </html>
