@@ -1,8 +1,7 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   SUPPORTED_LANGUAGES, 
-  Language, 
   TranslationHistoryItem 
 } from './types';
 import { translateText, detectLanguage, speakText } from './services/geminiService';
@@ -13,10 +12,15 @@ import {
   History as HistoryIcon, 
   Trash2, 
   Check, 
-  Languages,
+  FileText,
   Mic,
   Loader2,
-  Sparkles
+  Sparkles,
+  Settings,
+  ChevronRight,
+  Clock,
+  Languages,
+  PenTool
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -24,27 +28,29 @@ const App: React.FC = () => {
   const [translatedText, setTranslatedText] = useState('');
   const [sourceLang, setSourceLang] = useState<string>('auto');
   const [targetLang, setTargetLang] = useState<string>('es');
+  const [tone, setTone] = useState('Neutral');
   const [isTranslating, setIsTranslating] = useState(false);
   const [history, setHistory] = useState<TranslationHistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [copied, setCopied] = useState(false);
   const [detectedLang, setDetectedLang] = useState<string | null>(null);
 
-  // Auto-save history to localStorage
   useEffect(() => {
-    const saved = localStorage.getItem('translation_history');
+    const saved = localStorage.getItem('doctrans_history');
     if (saved) {
-      try {
-        setHistory(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse history", e);
-      }
+      try { setHistory(JSON.parse(saved)); } catch (e) {}
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('translation_history', JSON.stringify(history.slice(0, 50)));
+    localStorage.setItem('doctrans_history', JSON.stringify(history.slice(0, 20)));
   }, [history]);
+
+  const stats = useMemo(() => {
+    const words = sourceText.trim() ? sourceText.trim().split(/\s+/).length : 0;
+    const readingTime = Math.ceil(words / 200);
+    return { words, readingTime };
+  }, [sourceText]);
 
   const handleTranslate = useCallback(async () => {
     if (!sourceText.trim()) {
@@ -56,20 +62,15 @@ const App: React.FC = () => {
     setIsTranslating(true);
     try {
       let actualSourceLang = sourceLang;
-      
-      // If auto, detect language first
       if (sourceLang === 'auto') {
         const detected = await detectLanguage(sourceText);
         setDetectedLang(detected);
         actualSourceLang = detected;
-      } else {
-        setDetectedLang(null);
       }
 
-      const result = await translateText(sourceText, targetLang, actualSourceLang);
+      const result = await translateText(sourceText, targetLang, actualSourceLang, tone);
       setTranslatedText(result);
 
-      // Add to history
       const newHistoryItem: TranslationHistoryItem = {
         id: Date.now().toString(),
         sourceText,
@@ -78,278 +79,247 @@ const App: React.FC = () => {
         targetLang,
         timestamp: Date.now(),
       };
-      setHistory(prev => [newHistoryItem, ...prev].slice(0, 50));
+      setHistory(prev => [newHistoryItem, ...prev].slice(0, 20));
     } catch (error) {
-      console.error("Translation error", error);
-      alert("Something went wrong with the translation. Please check your API configuration.");
+      console.error(error);
     } finally {
       setIsTranslating(false);
     }
-  }, [sourceText, sourceLang, targetLang]);
+  }, [sourceText, sourceLang, targetLang, tone]);
 
-  // Debounce translation for better UX
+  // Debounced translation
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      if (sourceText.length > 3) {
-        handleTranslate();
-      }
-    }, 1000);
-    return () => clearTimeout(timeoutId);
-  }, [sourceText, targetLang, sourceLang]);
+    const timer = setTimeout(() => {
+      if (sourceText.length > 5) handleTranslate();
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [sourceText, targetLang, tone]);
 
-  const swapLanguages = () => {
-    if (sourceLang === 'auto' && detectedLang) {
-      setSourceLang(targetLang);
-      setTargetLang(detectedLang);
-    } else if (sourceLang !== 'auto') {
-      const temp = sourceLang;
-      setSourceLang(targetLang);
-      setTargetLang(temp);
-    }
-    setSourceText(translatedText);
-    setTranslatedText(sourceText);
-  };
-
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(translatedText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleSpeech = (text: string, lang: string) => {
-    // Choose voice based on language or generic
-    const voice = lang === 'en' ? 'Puck' : 'Kore';
-    speakText(text, voice);
-  };
-
-  const clearHistory = () => {
-    if (window.confirm("Clear all translation history?")) {
-      setHistory([]);
-    }
+  const swap = () => {
+    const oldSource = sourceText;
+    const oldTrans = translatedText;
+    const oldS = sourceLang === 'auto' ? detectedLang || 'en' : sourceLang;
+    const oldT = targetLang;
+    
+    setSourceLang(oldT);
+    setTargetLang(oldS);
+    setSourceText(oldTrans);
+    setTranslatedText(oldSource);
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center p-4 md:p-8">
-      {/* Header */}
-      <header className="w-full max-w-5xl flex items-center justify-between mb-8">
-        <div className="flex items-center gap-3">
-          <div className="bg-blue-600 p-2 rounded-xl text-white shadow-lg shadow-blue-200">
-            <Languages size={24} />
+    <div className="min-h-screen bg-slate-50 flex flex-col">
+      {/* Top Navbar */}
+      <nav className="h-16 border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-50 px-6 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-indigo-100 shadow-lg">
+            D
           </div>
-          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
-            Gemini <span className="text-blue-600">Ultra</span> Translator
-          </h1>
+          <span className="font-extrabold text-slate-800 text-lg tracking-tight">Doc Trans <span className="text-indigo-600">Pro</span></span>
+          <div className="ml-4 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 text-[10px] font-bold uppercase tracking-wider">Linguist Engine 3.1</div>
         </div>
-        <button 
-          onClick={() => setShowHistory(!showHistory)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${showHistory ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'}`}
-        >
-          <HistoryIcon size={18} />
-          <span className="hidden sm:inline font-medium">History</span>
-        </button>
-      </header>
+        
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setShowHistory(!showHistory)}
+            className={`p-2 rounded-xl transition-all ${showHistory ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-100'}`}
+          >
+            <HistoryIcon size={20} />
+          </button>
+          <button className="p-2 text-slate-400 hover:bg-slate-100 rounded-xl transition-all">
+            <Settings size={20} />
+          </button>
+          <div className="h-8 w-[1px] bg-slate-200 mx-2"></div>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500"></div>
+          </div>
+        </div>
+      </nav>
 
-      <main className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Translation Box */}
-        <div className={`col-span-12 ${showHistory ? 'lg:col-span-8' : ''} space-y-6 transition-all duration-300`}>
+      <div className="flex-1 flex flex-col lg:flex-row max-w-[1600px] mx-auto w-full p-4 lg:p-8 gap-8">
+        
+        {/* Workspace */}
+        <div className="flex-1 flex flex-col gap-6">
           
-          {/* Controls Bar */}
-          <div className="bg-white p-3 rounded-2xl shadow-sm border border-slate-100 flex flex-wrap items-center gap-3">
-            <select 
-              value={sourceLang}
-              onChange={(e) => setSourceLang(e.target.value)}
-              className="bg-slate-50 border-none text-slate-700 text-sm font-semibold rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none min-w-[140px]"
-            >
-              <option value="auto">Detect Language</option>
-              {SUPPORTED_LANGUAGES.map(lang => (
-                <option key={lang.code} value={lang.code}>{lang.name}</option>
-              ))}
-            </select>
-
-            <button 
-              onClick={swapLanguages}
-              className="p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-all"
-              title="Swap Languages"
-            >
-              <ArrowRightLeft size={20} />
-            </button>
-
-            <select 
-              value={targetLang}
-              onChange={(e) => setTargetLang(e.target.value)}
-              className="bg-slate-50 border-none text-slate-700 text-sm font-semibold rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-blue-500 outline-none min-w-[140px]"
-            >
-              {SUPPORTED_LANGUAGES.map(lang => (
-                <option key={lang.code} value={lang.code}>{lang.name}</option>
-              ))}
-            </select>
-
-            <div className="ml-auto flex items-center gap-2">
-               {isTranslating && (
-                 <div className="flex items-center gap-2 text-blue-500 text-xs font-medium animate-pulse">
-                   <Loader2 size={14} className="animate-spin" />
-                   Translating...
-                 </div>
-               )}
+          {/* Controls Panel */}
+          <div className="glass-panel pro-shadow rounded-2xl p-4 flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2 bg-slate-100/50 p-1 rounded-xl">
+              <select 
+                value={sourceLang}
+                onChange={(e) => setSourceLang(e.target.value)}
+                className="bg-transparent border-none text-sm font-semibold text-slate-700 px-3 py-2 outline-none"
+              >
+                <option value="auto">Auto Detect</option>
+                {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+              </select>
+              <button onClick={swap} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-all shadow-sm">
+                <ArrowRightLeft size={16} />
+              </button>
+              <select 
+                value={targetLang}
+                onChange={(e) => setTargetLang(e.target.value)}
+                className="bg-transparent border-none text-sm font-semibold text-slate-700 px-3 py-2 outline-none"
+              >
+                {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+              </select>
             </div>
+
+            <div className="h-6 w-[1px] bg-slate-200"></div>
+
+            <div className="flex items-center gap-2 bg-slate-100/50 p-1 rounded-xl">
+              <PenTool size={14} className="text-slate-400 ml-2" />
+              <select 
+                value={tone}
+                onChange={(e) => setTone(e.target.value)}
+                className="bg-transparent border-none text-sm font-semibold text-slate-700 px-3 py-2 outline-none"
+              >
+                <option>Neutral</option>
+                <option>Formal</option>
+                <option>Casual</option>
+                <option>Technical</option>
+              </select>
+            </div>
+
+            {isTranslating && (
+              <div className="ml-auto flex items-center gap-2 text-indigo-500 text-xs font-bold bg-indigo-50 px-3 py-1.5 rounded-full animate-pulse">
+                <Loader2 size={12} className="animate-spin" />
+                AI PROCESSING
+              </div>
+            )}
           </div>
 
-          {/* Text Areas */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Input */}
-            <div className="relative group">
+          {/* Document Panes */}
+          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 min-h-[500px]">
+            {/* Source Pane */}
+            <div className="flex flex-col glass-panel pro-shadow rounded-3xl overflow-hidden border-2 border-transparent focus-within:border-indigo-100 transition-all">
+              <div className="bg-white/50 border-b border-slate-100 px-6 py-3 flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Source Document</span>
+                <div className="flex gap-4">
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase">
+                    <FileText size={12} /> {stats.words} Words
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase">
+                    <Clock size={12} /> {stats.readingTime}m Read
+                  </div>
+                </div>
+              </div>
               <textarea
                 value={sourceText}
                 onChange={(e) => setSourceText(e.target.value)}
-                placeholder="Type text to translate..."
-                className="w-full h-64 p-6 bg-white border border-slate-200 rounded-3xl resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-lg text-slate-700 shadow-sm transition-all"
+                placeholder="Paste document text or type here..."
+                className="flex-1 p-8 doc-editor resize-none outline-none text-slate-700 leading-relaxed text-lg"
               />
-              <div className="absolute bottom-4 left-4 flex gap-2">
+              <div className="p-4 bg-white/50 border-t border-slate-100 flex gap-2">
                 <button 
-                  onClick={() => handleSpeech(sourceText, sourceLang)}
-                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
-                  disabled={!sourceText}
+                  onClick={() => speakText(sourceText)}
+                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
                 >
                   <Volume2 size={20} />
                 </button>
-                <button 
-                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
-                  title="Voice Input (Coming Soon)"
-                >
+                <button className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all">
                   <Mic size={20} />
                 </button>
               </div>
-              <div className="absolute bottom-4 right-4 text-xs font-semibold text-slate-400 bg-slate-50 px-2 py-1 rounded-md">
-                {detectedLang && sourceLang === 'auto' ? `Detected: ${SUPPORTED_LANGUAGES.find(l => l.code === detectedLang)?.name || detectedLang.toUpperCase()}` : ''}
-              </div>
             </div>
 
-            {/* Output */}
-            <div className="relative">
-              <div className={`w-full h-64 p-6 bg-slate-50 border border-slate-200 rounded-3xl text-lg text-slate-800 shadow-inner overflow-auto ${!translatedText && 'flex items-center justify-center'}`}>
-                {translatedText ? (
-                  translatedText
-                ) : (
-                  <span className="text-slate-400 italic">Translation will appear here...</span>
-                )}
+            {/* Translation Pane */}
+            <div className="flex flex-col glass-panel pro-shadow rounded-3xl overflow-hidden bg-slate-900/5">
+              <div className="bg-indigo-600/5 border-b border-indigo-100 px-6 py-3 flex items-center justify-between">
+                <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest flex items-center gap-2">
+                  <Sparkles size={12} /> AI Translation
+                </span>
+                <div className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-[10px] font-black rounded uppercase">
+                  {tone}
+                </div>
               </div>
-              <div className="absolute bottom-4 left-4 flex gap-2">
+              <div className="flex-1 p-8 overflow-auto text-slate-800 leading-relaxed text-lg">
+                {translatedText || <span className="text-slate-300 italic">Waiting for input...</span>}
+              </div>
+              <div className="p-4 bg-white/50 border-t border-slate-100 flex gap-2">
                 <button 
-                  onClick={() => handleSpeech(translatedText, targetLang)}
-                  className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                  onClick={() => speakText(translatedText)}
+                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
                   disabled={!translatedText}
                 >
                   <Volume2 size={20} />
                 </button>
                 <button 
-                  onClick={copyToClipboard}
-                  className={`p-2 rounded-xl transition-all ${copied ? 'text-green-600 bg-green-50' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}
+                  onClick={() => {
+                    navigator.clipboard.writeText(translatedText);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className={`p-2 rounded-xl transition-all ${copied ? 'text-green-600 bg-green-50' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
                   disabled={!translatedText}
                 >
                   {copied ? <Check size={20} /> : <Copy size={20} />}
                 </button>
-              </div>
-              <div className="absolute top-4 right-4">
-                 <Sparkles size={16} className="text-blue-300" />
+                <button 
+                  onClick={handleTranslate}
+                  className="ml-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold shadow-md shadow-indigo-200 transition-all flex items-center gap-2"
+                >
+                  Translate Now <ChevronRight size={14} />
+                </button>
               </div>
             </div>
           </div>
-
-          <button 
-            onClick={handleTranslate}
-            disabled={isTranslating || !sourceText}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-100 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
-          >
-            {isTranslating ? (
-              <>
-                <Loader2 className="animate-spin" />
-                Working...
-              </>
-            ) : (
-              'Translate'
-            )}
-          </button>
         </div>
 
-        {/* History Sidebar */}
+        {/* Sidebar History */}
         {showHistory && (
-          <aside className="col-span-12 lg:col-span-4 bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col max-h-[700px]">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <HistoryIcon size={20} className="text-blue-600" />
-                Recent
-              </h2>
-              <button 
-                onClick={clearHistory}
-                className="text-slate-400 hover:text-red-600 p-2 transition-colors"
-                title="Clear All"
-              >
-                <Trash2 size={18} />
-              </button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
-              {history.length === 0 ? (
-                <div className="text-center py-12">
-                  <div className="bg-slate-50 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <HistoryIcon size={24} className="text-slate-300" />
+          <aside className="w-full lg:w-80 flex flex-col gap-6 animate-in slide-in-from-right duration-300">
+            <div className="glass-panel pro-shadow rounded-3xl p-6 h-full flex flex-col">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                  <Clock size={18} className="text-indigo-600" /> Archive
+                </h3>
+                <button 
+                  onClick={() => setHistory([])}
+                  className="p-2 text-slate-300 hover:text-red-500 rounded-lg transition-all"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                {history.length === 0 ? (
+                  <div className="text-center py-20 opacity-30">
+                    <Languages size={40} className="mx-auto mb-2" />
+                    <p className="text-xs font-bold uppercase tracking-widest">Empty</p>
                   </div>
-                  <p className="text-slate-400 text-sm">No recent translations</p>
-                </div>
-              ) : (
-                history.map((item) => (
-                  <div 
-                    key={item.id} 
-                    className="p-4 bg-slate-50 rounded-2xl border border-transparent hover:border-blue-100 hover:bg-white transition-all cursor-pointer group"
-                    onClick={() => {
-                      setSourceText(item.sourceText);
-                      setTranslatedText(item.translatedText);
-                      setSourceLang(item.sourceLang);
-                      setTargetLang(item.targetLang);
-                    }}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                        {item.sourceLang} → {item.targetLang}
-                      </span>
-                      <span className="text-[10px] text-slate-400 ml-auto">
-                        {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
+                ) : (
+                  history.map(item => (
+                    <div 
+                      key={item.id}
+                      onClick={() => {
+                        setSourceText(item.sourceText);
+                        setTranslatedText(item.translatedText);
+                      }}
+                      className="p-4 bg-white hover:bg-indigo-50 border border-slate-100 rounded-2xl cursor-pointer transition-all group"
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="text-[10px] font-black text-indigo-500 uppercase">{item.sourceLang} → {item.targetLang}</span>
+                        <ChevronRight size={12} className="text-slate-300 group-hover:translate-x-1 transition-transform" />
+                      </div>
+                      <p className="text-xs text-slate-600 line-clamp-2 font-medium">{item.sourceText}</p>
                     </div>
-                    <p className="text-sm text-slate-800 font-medium line-clamp-2 mb-1">{item.sourceText}</p>
-                    <p className="text-sm text-slate-500 line-clamp-2">{item.translatedText}</p>
-                  </div>
-                ))
-              )}
+                  ))
+                )}
+              </div>
             </div>
           </aside>
         )}
-      </main>
+      </div>
 
-      {/* Footer Info */}
-      <footer className="mt-12 text-slate-400 text-sm flex items-center gap-2">
-        <span>Powered by</span>
-        <img 
-          src="https://www.gstatic.com/lamda/images/gemini_wordmark_600x120.png" 
-          alt="Gemini AI" 
-          className="h-4 opacity-50 grayscale"
-        />
+      <footer className="p-6 text-center text-slate-400 text-[10px] font-bold uppercase tracking-[0.2em]">
+        Linguistics Engine 3.1 &bull; Powered by Google Gemini &bull; Ready for Export
       </footer>
-      
+
       <style>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #e2e8f0;
-          border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #cbd5e1;
-        }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        .animate-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
     </div>
   );

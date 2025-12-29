@@ -1,16 +1,22 @@
 
 import { GoogleGenAI, Modality } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+// Ensure we initialize exactly as required by the docs
+const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export async function translateText(
   text: string, 
   targetLang: string, 
-  sourceLang: string = 'auto'
+  sourceLang: string = 'auto',
+  tone: string = 'Neutral'
 ): Promise<string> {
+  const ai = getAI();
   const model = 'gemini-3-flash-preview';
-  const prompt = `Translate the following text from ${sourceLang === 'auto' ? 'detecting the language' : sourceLang} to ${targetLang}. 
-  Provide only the translated text, no extra commentary or context.
+  const prompt = `Translate the following text to ${targetLang}. 
+  Source Language: ${sourceLang === 'auto' ? 'detect automatically' : sourceLang}
+  Tone: ${tone}
+  
+  Only return the translated string. Do not include any meta-commentary.
   
   Text: "${text}"`;
 
@@ -18,7 +24,7 @@ export async function translateText(
     model,
     contents: prompt,
     config: {
-      temperature: 0.1, // Low temperature for factual translation accuracy
+      temperature: 0.1,
     }
   });
 
@@ -26,8 +32,9 @@ export async function translateText(
 }
 
 export async function detectLanguage(text: string): Promise<string> {
+  const ai = getAI();
   const model = 'gemini-3-flash-preview';
-  const prompt = `Identify the ISO language code for the following text. Return ONLY the 2-letter code (e.g., 'en', 'fr', 'es').
+  const prompt = `Identify the 2-letter ISO language code for this text. Only return the code (e.g., 'en', 'fr').
   
   Text: "${text}"`;
 
@@ -39,7 +46,6 @@ export async function detectLanguage(text: string): Promise<string> {
   return response.text?.trim().toLowerCase() || 'en';
 }
 
-// Audio decoding helper functions
 function decode(base64: string) {
   const binaryString = atob(base64);
   const len = binaryString.length;
@@ -71,6 +77,7 @@ async function decodeAudioData(
 
 export async function speakText(text: string, voiceName: string = 'Kore'): Promise<void> {
   if (!text) return;
+  const ai = getAI();
 
   try {
     const response = await ai.models.generateContent({
