@@ -3,51 +3,25 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   SUPPORTED_LANGUAGES, 
   TranslationHistoryItem 
-} from './types';
-import { translateText, detectLanguage, speakText } from './services/geminiService';
+} from './types.ts';
+import { translateText, detectLanguage, speakText } from './services/aiService.ts';
 import { 
   ArrowRightLeft, 
   Volume2, 
   Copy, 
   History as HistoryIcon, 
-  Trash2, 
   Check, 
   Loader2,
   Sparkles,
   ChevronRight,
-  Clock,
-  Languages,
   PenTool,
   FileUp,
-  AlertCircle,
   Search,
   Globe,
-  Mic
+  Mic,
+  MicOff
 } from 'lucide-react';
 import * as mammoth from 'mammoth';
-import { GoogleGenAI, Modality } from "@google/genai";
-
-// Audio utility functions
-const encodeAudio = (bytes: Uint8Array) => {
-  let binary = '';
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-};
-
-const createAudioBlob = (data: Float32Array) => {
-  const l = data.length;
-  const int16 = new Int16Array(l);
-  for (let i = 0; i < l; i++) {
-    int16[i] = data[i] * 32768;
-  }
-  return {
-    data: encodeAudio(new Uint8Array(int16.buffer)),
-    mimeType: 'audio/pcm;rate=16000',
-  };
-};
 
 const App: React.FC = () => {
   const [sourceText, setSourceText] = useState('');
@@ -61,20 +35,35 @@ const App: React.FC = () => {
   const [showHistory, setShowHistory] = useState(false);
   const [copied, setCopied] = useState(false);
   const [detectedLang, setDetectedLang] = useState<string | null>(null);
-  const [fileError, setFileError] = useState<string | null>(null);
   
-  // Voice Input State
+  // Browser Speech Recognition
   const [isRecording, setIsRecording] = useState(false);
-  const sessionRef = useRef<any>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const recognitionRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('doctrans_history');
     if (saved) {
       try { setHistory(JSON.parse(saved)); } catch (e) {}
+    }
+
+    // Initialize Web Speech API
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+      
+      recognitionRef.current.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        setSourceText(prev => (prev.endsWith(' ') || prev === '' ? prev + transcript : prev + ' ' + transcript));
+      };
+
+      recognitionRef.current.onend = () => setIsRecording(false);
+      recognitionRef.current.onerror = () => setIsRecording(false);
     }
   }, []);
 
@@ -84,13 +73,13 @@ const App: React.FC = () => {
 
   const stats = useMemo(() => {
     const words = sourceText.trim() ? sourceText.trim().split(/\s+/).length : 0;
-    const readingTime = Math.ceil(words / 200) || 1;
-    return { words, readingTime };
+    return { words };
   }, [sourceText]);
 
   const detectedLangName = useMemo(() => {
     if (!detectedLang) return null;
-    return SUPPORTED_LANGUAGES.find(l => l.code === detectedLang.toLowerCase())?.name || detectedLang.toUpperCase();
+    const lang = SUPPORTED_LANGUAGES.find(l => l.code === detectedLang.toLowerCase());
+    return lang ? lang.name : detectedLang.toUpperCase();
   }, [detectedLang]);
 
   const handleTranslate = useCallback(async () => {
@@ -130,12 +119,13 @@ const App: React.FC = () => {
     }
   }, [sourceText, sourceLang, targetLang, tone]);
 
+  // Auto-translate debounce
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (sourceText.length > 3 && !isRecording && !isProcessingFile) {
+      if (sourceText.length > 5 && !isRecording && !isProcessingFile) {
         handleTranslate();
       }
-    }, 1500);
+    }, 1200);
     return () => clearTimeout(timer);
   }, [sourceText, targetLang, tone, isRecording, isProcessingFile, handleTranslate]);
 
@@ -156,8 +146,6 @@ const App: React.FC = () => {
     if (!file) return;
 
     setIsProcessingFile(true);
-    setFileError(null);
-
     try {
       const extension = file.name.split('.').pop()?.toLowerCase();
       if (extension === 'txt') {
@@ -165,104 +153,47 @@ const App: React.FC = () => {
         setSourceText(text);
       } else if (extension === 'docx') {
         const arrayBuffer = await file.arrayBuffer();
+        // @ts-ignore
         const result = await mammoth.extractRawText({ arrayBuffer });
         setSourceText(result.value);
-      } else {
-        setFileError("Unsupported format. Use .txt or .docx");
       }
     } catch (err) {
-      setFileError("Error reading document.");
+      console.error("File error:", err);
     } finally {
       setIsProcessingFile(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const stopRecording = useCallback(() => {
-    if (sessionRef.current) {
-      try { sessionRef.current.close(); } catch(e) {}
-      sessionRef.current = null;
-    }
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    setIsRecording(false);
-  }, []);
-
-  const startRecording = useCallback(async () => {
-    try {
+  const toggleRecording = () => {
+    if (!recognitionRef.current) return alert("Speech recognition not supported in this browser.");
+    if (isRecording) {
+      recognitionRef.current.stop();
+    } else {
+      recognitionRef.current.start();
       setIsRecording(true);
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      audioContextRef.current = audioContext;
-
-      const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-        config: {
-          responseModalities: [Modality.AUDIO],
-          inputAudioTranscription: {},
-        },
-        callbacks: {
-          onopen: () => {
-            const source = audioContext.createMediaStreamSource(stream);
-            const scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-            processorRef.current = scriptProcessor;
-            scriptProcessor.onaudioprocess = (e) => {
-              const inputData = e.inputBuffer.getChannelData(0);
-              const pcmBlob = createAudioBlob(inputData);
-              sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
-            };
-            source.connect(scriptProcessor);
-            scriptProcessor.connect(audioContext.destination);
-          },
-          onmessage: (message: any) => {
-            if (message.serverContent?.inputTranscription) {
-              const newText = message.serverContent.inputTranscription.text;
-              setSourceText(prev => (prev.trim() + " " + newText).trim());
-            }
-          },
-          onerror: () => stopRecording(),
-          onclose: () => stopRecording()
-        }
-      });
-      sessionRef.current = await sessionPromise;
-    } catch (err) {
-      console.error("Mic error:", err);
-      setIsRecording(false);
     }
-  }, [stopRecording]);
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <nav className="h-16 border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-50 px-6 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-indigo-100 shadow-lg">D</div>
-          <span className="font-extrabold text-slate-800 text-lg tracking-tight">Doc Trans <span className="text-indigo-600">Pro</span></span>
+          <span className="font-extrabold text-slate-800 text-lg tracking-tight">Doc Trans <span className="text-indigo-600">Local</span></span>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowHistory(!showHistory)} className={`p-2 rounded-xl transition-all ${showHistory ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-100'}`}><HistoryIcon size={20} /></button>
           <div className="h-8 w-[1px] bg-slate-200 mx-2"></div>
-          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 border-2 border-white shadow-sm"></div>
+          <div className="w-8 h-8 rounded-full bg-slate-200 border-2 border-white shadow-sm flex items-center justify-center text-[10px] font-bold text-slate-500">OFF</div>
         </div>
       </nav>
 
       <main className="flex-1 flex flex-col lg:flex-row max-w-[1600px] mx-auto w-full p-4 lg:p-8 gap-8">
         <div className="flex-1 flex flex-col gap-6">
           <div className="glass-panel pro-shadow rounded-2xl p-4 flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2 bg-slate-100/60 p-1 rounded-xl">
-              <div className="relative flex items-center">
+            <div className="flex items-center gap-2 bg-slate-100/60 p-1 rounded-xl relative">
+              <div className="flex items-center">
                 <select 
                   value={sourceLang} 
                   onChange={(e) => setSourceLang(e.target.value)}
@@ -271,13 +202,17 @@ const App: React.FC = () => {
                   <option value="auto">Auto Detect</option>
                   {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
                 </select>
+                
                 {sourceLang === 'auto' && detectedLangName && (
-                  <div className="absolute -top-6 left-3 animate-in flex items-center gap-1 bg-indigo-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full uppercase shadow-sm">
-                    <Search size={8} /> {detectedLangName}
+                  <div className="ml-1 animate-in flex items-center gap-1.5 bg-indigo-600 text-white text-[10px] font-black px-2.5 py-1 rounded-lg uppercase shadow-lg shadow-indigo-200 whitespace-nowrap">
+                    <Search size={10} className="stroke-[3px]" />
+                    <span>{detectedLangName}</span>
                   </div>
                 )}
               </div>
-              <button onClick={swap} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-all shadow-sm"><ArrowRightLeft size={16} /></button>
+              
+              <button onClick={swap} className="mx-1 p-2 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-all shadow-sm"><ArrowRightLeft size={16} /></button>
+              
               <select 
                 value={targetLang} 
                 onChange={(e) => setTargetLang(e.target.value)}
@@ -296,19 +231,22 @@ const App: React.FC = () => {
 
             <div className="ml-auto flex gap-2">
               {isTranslating && (
-                <div className="flex items-center gap-2 text-indigo-500 text-[10px] font-bold bg-indigo-50 px-3 py-1.5 rounded-full animate-pulse">
-                  <Loader2 size={12} className="animate-spin" /> AI THINKING
+                <div className="flex items-center gap-2 text-indigo-500 text-[10px] font-bold bg-indigo-50 px-3 py-1.5 rounded-full animate-pulse border border-indigo-100">
+                  <Loader2 size={12} className="animate-spin" /> LOCAL ENGINE
                 </div>
               )}
             </div>
           </div>
 
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 min-h-[500px]">
-            <div className="flex flex-col glass-panel pro-shadow rounded-3xl overflow-hidden">
+            <div className="flex flex-col glass-panel pro-shadow rounded-3xl overflow-hidden group">
               <div className="bg-white/50 border-b border-slate-100 px-6 py-3 flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Globe size={12} /> Source</span>
-                <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[10px] font-black px-2 py-1 rounded transition-colors uppercase"><FileUp size={12} /> Import</button>
-                <input type="file" ref={fileInputRef} className="hidden" accept=".txt,.docx" onChange={handleFileUpload} />
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Globe size={12} /> Input</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-slate-300 font-bold uppercase">{stats.words} words</span>
+                  <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[10px] font-black px-2 py-1 rounded-lg transition-colors uppercase"><FileUp size={12} /> Import</button>
+                  <input type="file" ref={fileInputRef} className="hidden" accept=".txt,.docx" onChange={handleFileUpload} />
+                </div>
               </div>
               <textarea
                 value={sourceText} onChange={(e) => setSourceText(e.target.value)}
@@ -316,29 +254,41 @@ const App: React.FC = () => {
                 className="flex-1 p-8 doc-editor resize-none outline-none text-slate-700 leading-relaxed text-lg"
               />
               <div className="p-4 bg-white/40 border-t border-slate-100 flex gap-2">
-                <button onClick={() => speakText(sourceText)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"><Volume2 size={20} /></button>
-                <button onClick={() => (isRecording ? stopRecording() : startRecording())} className={`p-2 rounded-xl transition-all ${isRecording ? 'text-red-600 bg-red-50 shadow-inner' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}><Mic size={20} /></button>
+                <button onClick={() => speakText(sourceText)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Listen"><Volume2 size={20} /></button>
+                <button 
+                  onClick={toggleRecording} 
+                  className={`p-2 rounded-xl transition-all ${isRecording ? 'text-red-600 bg-red-50 shadow-inner animate-pulse' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                  title={isRecording ? "Stop Listening" : "Start Voice Input"}
+                >
+                  <Mic size={20} />
+                </button>
               </div>
             </div>
 
             <div className="flex flex-col glass-panel pro-shadow rounded-3xl overflow-hidden bg-slate-900/5">
               <div className="bg-indigo-600/5 border-b border-indigo-100 px-6 py-3 flex items-center justify-between">
                 <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest flex items-center gap-2"><Sparkles size={12} /> Translation</span>
+                <div className="flex items-center gap-2">
+                   <div className="px-2 py-0.5 bg-indigo-100/50 text-indigo-600 text-[9px] font-black rounded-md uppercase tracking-tighter">Native Core 1.0</div>
+                </div>
               </div>
               <div className="flex-1 p-8 overflow-auto text-slate-800 leading-relaxed text-lg whitespace-pre-wrap">
                 {translatedText || <span className="text-slate-300 italic">Translation will appear here...</span>}
               </div>
               <div className="p-4 bg-white/40 border-t border-slate-100 flex gap-2">
-                <button onClick={() => speakText(translatedText)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" disabled={!translatedText}><Volume2 size={20} /></button>
+                <button onClick={() => speakText(translatedText, targetLang)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" disabled={!translatedText}><Volume2 size={20} /></button>
                 <button onClick={() => { navigator.clipboard.writeText(translatedText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className={`p-2 rounded-xl transition-all ${copied ? 'text-green-600 bg-green-50' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`} disabled={!translatedText}>{copied ? <Check size={20} /> : <Copy size={20} />}</button>
-                <button onClick={handleTranslate} className="ml-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold shadow-md transition-all flex items-center gap-2">
-                  Translate <ChevronRight size={14} />
+                <button onClick={handleTranslate} className="ml-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-100 transition-all flex items-center gap-2 active:scale-95">
+                  Process Now <ChevronRight size={14} />
                 </button>
               </div>
             </div>
           </div>
         </div>
       </main>
+      <footer className="h-10 border-t border-slate-100 flex items-center justify-center bg-white/50 text-[10px] font-bold text-slate-300 uppercase tracking-widest">
+        Private & Secure • Local Browser Engine
+      </footer>
     </div>
   );
 };
