@@ -21,7 +21,13 @@ const SUPPORTED_LANGUAGES = [
   { code: 'ar', name: 'Arabic' }
 ];
 
-const TONES = ['Neutral', 'Professional', 'Casual', 'Academic', 'Creative'];
+const TONES = [
+  { name: 'Neutral', prompt: 'Use a clear, standard tone.' },
+  { name: 'Professional', prompt: 'Use a formal, business-appropriate tone.' },
+  { name: 'Casual', prompt: 'Use a friendly, conversational tone.' },
+  { name: 'Academic', prompt: 'Use a precise, scholarly tone.' },
+  { name: 'Creative', prompt: 'Use an expressive and imaginative tone.' }
+];
 
 const App = () => {
   const [sourceText, setSourceText] = useState('');
@@ -37,7 +43,7 @@ const App = () => {
   const recognitionRef = useRef(null);
 
   useEffect(() => {
-    // Cast window to any to access browser-specific SpeechRecognition APIs in TypeScript
+    // Fix: Access browser-specific SpeechRecognition using (window as any) to avoid TypeScript errors in the global window object
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
@@ -58,26 +64,31 @@ const App = () => {
   const handleTranslate = async () => {
     if (!sourceText.trim()) return;
     setLoading(true);
+    setTranslatedText(''); // Clear previous
     
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const prompt = `Translate this text to ${targetLang}. 
-      Desired Tone: ${tone}. 
-      Source Context: ${sourceLang === 'auto' ? 'Detect automatically' : 'Language is ' + sourceLang}.
+      const selectedTone = TONES.find(t => t.name === tone) || TONES[0];
       
-      Text: "${sourceText}"
+      const prompt = `Translate the following text into ${targetLang}. 
+      ${selectedTone.prompt}
+      Source Language: ${sourceLang === 'auto' ? 'Detect automatically' : sourceLang}.
       
-      Return ONLY the translated text.`;
+      TEXT TO TRANSLATE:
+      "${sourceText}"
+      
+      Return ONLY the translated text. Do not include any explanations or conversational filler.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: prompt
       });
 
-      setTranslatedText(response.text?.trim() || '');
+      const outputText = response.text || '';
+      setTranslatedText(outputText.trim());
     } catch (error) {
-      console.error(error);
-      setTranslatedText("Error: Translation failed. Check console for details.");
+      console.error("Translation failed:", error);
+      setTranslatedText("Translation error. Please ensure your API connection is active.");
     } finally {
       setLoading(false);
     }
@@ -91,7 +102,7 @@ const App = () => {
         recognitionRef.current?.start();
         setIsRecording(true);
       } catch (e) {
-        alert("Microphone access denied or not supported.");
+        alert("Speech recognition not supported or permission denied.");
       }
     }
   };
@@ -106,7 +117,10 @@ const App = () => {
       } else {
         setSourceText(await file.text());
       }
-    } catch (err) { console.error(err); }
+    } catch (err) { 
+      console.error(err);
+      alert("Error reading file.");
+    }
   };
 
   const speak = (text, lang) => {
@@ -126,13 +140,16 @@ const App = () => {
           </div>
           <h1 className="brand-font text-xl text-slate-900 font-extrabold">TransPro <span className="text-indigo-600">AI</span></h1>
         </div>
-        <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-green-50 text-green-600 rounded-full border border-green-100">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-[10px] font-bold uppercase tracking-widest">Gemini 3 Connected</span>
+        <div className="flex items-center gap-4">
+           <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-green-50 text-green-600 rounded-full border border-green-100">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-[10px] font-bold uppercase tracking-widest">Engine Live</span>
+           </div>
         </div>
       </nav>
 
       <main className="flex-1 p-6 md:p-10 max-w-7xl mx-auto w-full flex flex-col gap-6">
+        {/* Toolbar */}
         <div className="glass p-4 rounded-3xl flex flex-wrap items-center gap-4 shadow-sm border border-white">
           <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-2xl border">
             <select value={sourceLang} onChange={e => setSourceLang(e.target.value)} className="bg-transparent text-sm font-bold px-3 py-1 outline-none cursor-pointer">
@@ -145,29 +162,29 @@ const App = () => {
             </select>
           </div>
           <select value={tone} onChange={e => setTone(e.target.value)} className="bg-slate-100 text-sm font-bold px-4 py-2 rounded-2xl outline-none cursor-pointer">
-            {TONES.map(t => <option key={t} value={t}>{t} Tone</option>)}
+            {TONES.map(t => <option key={t.name} value={t.name}>{t.name} Tone</option>)}
           </select>
           <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2 px-5 py-2.5 bg-white border rounded-2xl text-sm font-bold ml-auto hover:bg-slate-50 transition-all shadow-sm">
-            <FileUp size={18} className="text-indigo-600" /> Upload docx/txt
+            <FileUp size={18} className="text-indigo-600" /> Upload File
           </button>
           <input type="file" ref={fileInputRef} className="hidden" accept=".txt,.docx" onChange={handleFileUpload} />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1">
           {/* Input Panel */}
-          <div className="flex flex-col bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden">
+          <div className="flex flex-col bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden min-h-[400px]">
             <div className="p-5 border-b flex items-center justify-between bg-slate-50/50">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Globe size={14}/> Source Input</span>
-              <button onClick={() => setSourceText('')} className="p-2 text-slate-300 hover:text-red-500 transition-colors" title="Clear All"><Trash2 size={18}/></button>
+              <button onClick={() => setSourceText('')} className="p-2 text-slate-300 hover:text-red-500 transition-colors" title="Clear"><Trash2 size={18}/></button>
             </div>
             <textarea 
               value={sourceText} 
               onChange={e => setSourceText(e.target.value)} 
-              placeholder="Paste text or start speaking..." 
+              placeholder="Start typing, paste a document, or use the microphone..." 
               className="flex-1 p-8 text-xl text-slate-700 outline-none resize-none editor-grid leading-relaxed"
             />
             <div className="p-4 border-t flex gap-2">
-              <button onClick={() => speak(sourceText, sourceLang)} className="p-3 bg-slate-50 text-slate-400 rounded-2xl hover:text-indigo-600 transition-colors"><Volume2 size={22}/></button>
+              <button onClick={() => speak(sourceText, sourceLang)} className="p-3 bg-slate-50 text-slate-400 rounded-2xl hover:text-indigo-600 transition-colors" disabled={!sourceText}><Volume2 size={22}/></button>
               <button onClick={toggleRecording} className={`p-3 rounded-2xl transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-50 text-slate-400 hover:text-indigo-600'}`}>
                 <Mic size={22}/>
               </button>
@@ -175,25 +192,25 @@ const App = () => {
           </div>
 
           {/* Output Panel */}
-          <div className="flex flex-col bg-slate-900 rounded-[2rem] shadow-2xl overflow-hidden">
+          <div className="flex flex-col bg-slate-900 rounded-[2rem] shadow-2xl overflow-hidden min-h-[400px]">
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Sparkles size={14} className="text-indigo-400"/> AI Result</span>
-              {loading && <Loader2 size={16} className="text-indigo-400 animate-spin"/>}
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Sparkles size={14} className="text-indigo-400"/> Translation Output</span>
+              {loading && <Loader2 size={18} className="text-indigo-400 animate-spin"/>}
             </div>
-            <div className="flex-1 p-8 text-xl text-indigo-50 leading-relaxed whitespace-pre-wrap overflow-y-auto">
-              {translatedText || <p className="text-slate-700 italic">Ready for translation...</p>}
+            <div className="flex-1 p-8 text-xl text-indigo-50 leading-relaxed whitespace-pre-wrap overflow-y-auto font-medium">
+              {translatedText || <p className="text-slate-700 italic font-normal">Waiting for input...</p>}
             </div>
             <div className="p-5 bg-slate-800/40 border-t border-slate-800 flex items-center justify-between">
               <div className="flex gap-2">
-                <button onClick={() => speak(translatedText, targetLang)} className="p-3 bg-slate-800 text-slate-500 rounded-2xl hover:text-indigo-300" disabled={!translatedText}><Volume2 size={22}/></button>
-                <button onClick={() => { navigator.clipboard.writeText(translatedText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-3 bg-slate-800 text-slate-500 rounded-2xl hover:text-indigo-300" disabled={!translatedText}>
+                <button onClick={() => speak(translatedText, targetLang)} className="p-3 bg-slate-800 text-slate-500 rounded-2xl hover:text-indigo-300 transition-colors" disabled={!translatedText}><Volume2 size={22}/></button>
+                <button onClick={() => { navigator.clipboard.writeText(translatedText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-3 bg-slate-800 text-slate-500 rounded-2xl hover:text-indigo-300 transition-colors" disabled={!translatedText}>
                   {copied ? <Check size={22} className="text-green-400" /> : <Copy size={22} />}
                 </button>
               </div>
               <button 
                 onClick={handleTranslate} 
                 disabled={loading || !sourceText} 
-                className="px-10 py-4 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-black rounded-2xl shadow-xl flex items-center gap-3 transition-all active:scale-95 disabled:opacity-50"
+                className="px-10 py-4 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-black rounded-2xl shadow-xl flex items-center gap-3 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? 'PROCESSING...' : 'TRANSLATE'} <ChevronRight size={20} />
               </button>
@@ -202,7 +219,7 @@ const App = () => {
         </div>
       </main>
       <footer className="p-4 text-center border-t bg-white">
-          <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Global Language Engine • Secure & Private</p>
+          <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Enterprise Translation Engine • 100% Private</p>
       </footer>
     </div>
   );
