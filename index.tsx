@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { GoogleGenAI } from "@google/genai";
 import { 
   Languages, ArrowRightLeft, Volume2, Copy, Check, Loader2, 
-  Mic, FileUp, Sparkles, Trash2, ChevronRight, Globe 
+  Mic, FileUp, Sparkles, Trash2, ChevronRight, Globe, AlertCircle 
 } from 'lucide-react';
 import * as mammoth from 'mammoth';
 
@@ -38,18 +38,18 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState('');
 
-  const fileInputRef = useRef(null);
-  const recognitionRef = useRef(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
-    // Fix: Access browser-specific SpeechRecognition using (window as any) to avoid TypeScript errors in the global window object
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.onresult = (event) => {
+      recognition.onresult = (event: any) => {
         let transcript = '';
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           transcript += event.results[i][0].transcript;
@@ -64,20 +64,25 @@ const App = () => {
   const handleTranslate = async () => {
     if (!sourceText.trim()) return;
     setLoading(true);
-    setTranslatedText(''); // Clear previous
+    setTranslatedText('');
+    setError('');
     
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const selectedTone = TONES.find(t => t.name === tone) || TONES[0];
+      const targetLangName = SUPPORTED_LANGUAGES.find(l => l.code === targetLang)?.name || 'target language';
       
-      const prompt = `Translate the following text into ${targetLang}. 
-      ${selectedTone.prompt}
-      Source Language: ${sourceLang === 'auto' ? 'Detect automatically' : sourceLang}.
+      const prompt = `You are a professional translator. 
+      Task: Translate the following text into ${targetLangName}. 
+      Tone requirements: ${selectedTone.prompt}
+      Context: ${sourceLang === 'auto' ? 'The source language should be detected automatically.' : 'The source language is ' + sourceLang}.
       
       TEXT TO TRANSLATE:
-      "${sourceText}"
+      """
+      ${sourceText}
+      """
       
-      Return ONLY the translated text. Do not include any explanations or conversational filler.`;
+      Return ONLY the translated content. Do not provide any notes, metadata, or conversational filler.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -85,10 +90,11 @@ const App = () => {
       });
 
       const outputText = response.text || '';
+      if (!outputText) throw new Error("Empty response from AI");
       setTranslatedText(outputText.trim());
-    } catch (error) {
-      console.error("Translation failed:", error);
-      setTranslatedText("Translation error. Please ensure your API connection is active.");
+    } catch (err: any) {
+      console.error("Translation failed:", err);
+      setError("Translation failed. Please check your text and try again.");
     } finally {
       setLoading(false);
     }
@@ -107,27 +113,38 @@ const App = () => {
     }
   };
 
-  const handleFileUpload = async (e) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    setError('');
+
     try {
-      if (file.name.endsWith('.docx')) {
+      if (extension === 'docx') {
         const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
         setSourceText(result.value);
-      } else {
+      } else if (extension === 'txt') {
         setSourceText(await file.text());
+      } else if (extension === 'pdf') {
+        setError("PDF format is not supported. Please convert to .docx or .txt first.");
+      } else {
+        setError(`.${extension} files are not supported. Use .docx or .txt.`);
       }
     } catch (err) { 
       console.error(err);
-      alert("Error reading file.");
+      setError("Error reading the file.");
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const speak = (text, lang) => {
+  const speak = (text: string, langCode: string) => {
     if (!text) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang;
+    // Find the right voice code if possible, default to langCode
+    utterance.lang = langCode;
     window.speechSynthesis.speak(utterance);
   };
 
@@ -143,7 +160,7 @@ const App = () => {
         <div className="flex items-center gap-4">
            <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-green-50 text-green-600 rounded-full border border-green-100">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-[10px] font-bold uppercase tracking-widest">Engine Live</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest">System Ready</span>
            </div>
         </div>
       </nav>
@@ -165,26 +182,33 @@ const App = () => {
             {TONES.map(t => <option key={t.name} value={t.name}>{t.name} Tone</option>)}
           </select>
           <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2 px-5 py-2.5 bg-white border rounded-2xl text-sm font-bold ml-auto hover:bg-slate-50 transition-all shadow-sm">
-            <FileUp size={18} className="text-indigo-600" /> Upload File
+            <FileUp size={18} className="text-indigo-600" /> Import Document
           </button>
           <input type="file" ref={fileInputRef} className="hidden" accept=".txt,.docx" onChange={handleFileUpload} />
         </div>
 
+        {error && (
+          <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-center gap-3 text-red-600 text-sm font-medium animate-in fade-in slide-in-from-top-2">
+            <AlertCircle size={18} />
+            {error}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1">
           {/* Input Panel */}
-          <div className="flex flex-col bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden min-h-[400px]">
+          <div className="flex flex-col bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden min-h-[450px]">
             <div className="p-5 border-b flex items-center justify-between bg-slate-50/50">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Globe size={14}/> Source Input</span>
-              <button onClick={() => setSourceText('')} className="p-2 text-slate-300 hover:text-red-500 transition-colors" title="Clear"><Trash2 size={18}/></button>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Globe size={14}/> Source Text</span>
+              <button onClick={() => { setSourceText(''); setTranslatedText(''); setError(''); }} className="p-2 text-slate-300 hover:text-red-500 transition-colors" title="Clear"><Trash2 size={18}/></button>
             </div>
             <textarea 
               value={sourceText} 
               onChange={e => setSourceText(e.target.value)} 
-              placeholder="Start typing, paste a document, or use the microphone..." 
-              className="flex-1 p-8 text-xl text-slate-700 outline-none resize-none editor-grid leading-relaxed"
+              placeholder="Start typing or upload a .docx/.txt file..." 
+              className="flex-1 p-8 text-xl text-slate-700 outline-none resize-none editor-grid leading-relaxed placeholder:text-slate-300"
             />
             <div className="p-4 border-t flex gap-2">
-              <button onClick={() => speak(sourceText, sourceLang)} className="p-3 bg-slate-50 text-slate-400 rounded-2xl hover:text-indigo-600 transition-colors" disabled={!sourceText}><Volume2 size={22}/></button>
+              <button onClick={() => speak(sourceText, sourceLang)} className="p-3 bg-slate-50 text-slate-400 rounded-2xl hover:text-indigo-600 transition-colors disabled:opacity-30" disabled={!sourceText}><Volume2 size={22}/></button>
               <button onClick={toggleRecording} className={`p-3 rounded-2xl transition-all ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-50 text-slate-400 hover:text-indigo-600'}`}>
                 <Mic size={22}/>
               </button>
@@ -192,18 +216,18 @@ const App = () => {
           </div>
 
           {/* Output Panel */}
-          <div className="flex flex-col bg-slate-900 rounded-[2rem] shadow-2xl overflow-hidden min-h-[400px]">
+          <div className="flex flex-col bg-slate-900 rounded-[2rem] shadow-2xl overflow-hidden min-h-[450px]">
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Sparkles size={14} className="text-indigo-400"/> Translation Output</span>
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Sparkles size={14} className="text-indigo-400"/> AI Result</span>
               {loading && <Loader2 size={18} className="text-indigo-400 animate-spin"/>}
             </div>
-            <div className="flex-1 p-8 text-xl text-indigo-50 leading-relaxed whitespace-pre-wrap overflow-y-auto font-medium">
-              {translatedText || <p className="text-slate-700 italic font-normal">Waiting for input...</p>}
+            <div className="flex-1 p-8 text-xl text-indigo-50 leading-relaxed whitespace-pre-wrap overflow-y-auto font-medium break-words">
+              {translatedText || <p className="text-slate-700 italic font-normal">Your translation will appear here...</p>}
             </div>
             <div className="p-5 bg-slate-800/40 border-t border-slate-800 flex items-center justify-between">
               <div className="flex gap-2">
-                <button onClick={() => speak(translatedText, targetLang)} className="p-3 bg-slate-800 text-slate-500 rounded-2xl hover:text-indigo-300 transition-colors" disabled={!translatedText}><Volume2 size={22}/></button>
-                <button onClick={() => { navigator.clipboard.writeText(translatedText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-3 bg-slate-800 text-slate-500 rounded-2xl hover:text-indigo-300 transition-colors" disabled={!translatedText}>
+                <button onClick={() => speak(translatedText, targetLang)} className="p-3 bg-slate-800 text-slate-500 rounded-2xl hover:text-indigo-300 transition-colors disabled:opacity-30" disabled={!translatedText}><Volume2 size={22}/></button>
+                <button onClick={() => { navigator.clipboard.writeText(translatedText); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="p-3 bg-slate-800 text-slate-500 rounded-2xl hover:text-indigo-300 transition-colors disabled:opacity-30" disabled={!translatedText}>
                   {copied ? <Check size={22} className="text-green-400" /> : <Copy size={22} />}
                 </button>
               </div>
@@ -219,11 +243,11 @@ const App = () => {
         </div>
       </main>
       <footer className="p-4 text-center border-t bg-white">
-          <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Enterprise Translation Engine • 100% Private</p>
+          <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Enterprise Translation Engine • Privacy Protected</p>
       </footer>
     </div>
   );
 };
 
-const root = createRoot(document.getElementById('root'));
+const root = createRoot(document.getElementById('root')!);
 root.render(<App />);
