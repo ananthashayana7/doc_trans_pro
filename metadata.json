@@ -1,7 +1,8 @@
 {
-  "name": "Doc Trans Local",
-  "description": "Professional document translation suite using browser-native capabilities. No API key required.",
   "requestFramePermissions": [
-    "microphone"
-  ]
+    "microphone",
+    "camera"
+  ],
+  "name": "",
+  "description": ""
 }

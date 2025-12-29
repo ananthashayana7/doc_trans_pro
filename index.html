@@ -3,45 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Doc Trans Local | Private AI Translation</title>
+    <title>TransPro AI | Universal Translator</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     
-    <!-- Babel standalone allows running JSX/TSX content in .js files directly -->
+    <!-- Babel standalone allows running TSX/JSX directly in the browser -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <style>
         body {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            background: radial-gradient(circle at top right, #fdfbfb 0%, #ebedee 100%);
-            overflow-x: hidden;
-            min-height: 100vh;
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
         }
-        .glass-panel {
-            background: rgba(255, 255, 255, 0.75);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+        .brand-font { font-family: 'Plus Jakarta Sans', sans-serif; }
+        .glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.4);
         }
-        .pro-shadow {
-            box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.04), 0 2px 10px -2px rgba(0, 0, 0, 0.01);
-        }
-        .doc-editor {
-            background-image: 
-                linear-gradient(#f1f5f9 1px, transparent 1px),
-                linear-gradient(90deg, #f1f5f9 1px, transparent 1px);
+        .editor-grid {
+            background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
             background-size: 24px 24px;
         }
+        .glow-indigo { box-shadow: 0 0 20px rgba(79, 70, 229, 0.1); }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-slide { animation: slideIn 0.3s ease-out forwards; }
     </style>
 
     <script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@19.0.0",
-    "react-dom": "https://esm.sh/react-dom@19.0.0",
-    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
-    "lucide-react": "https://esm.sh/lucide-react@0.460.0?external=react",
-    "mammoth": "https://esm.sh/mammoth@1.8.0",
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "@google/genai": "https://esm.sh/@google/genai",
+    "lucide-react": "https://esm.sh/lucide-react",
+    "mammoth": "https://esm.sh/mammoth",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
   }
 }
@@ -49,7 +50,7 @@
 </head>
 <body>
     <div id="root"></div>
-    <!-- Using .js extension for the file so the server sends correct MIME type -->
-    <script type="text/babel" data-type="module" src="index.js"></script>
+    <!-- type="text/babel" and data-type="module" are required for Babel + ESM -->
+    <script type="text/babel" data-type="module" src="index.tsx"></script>
 </body>
 </html>
