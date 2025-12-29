@@ -1,0 +1,7 @@
+{
+  "name": "Gemini Ultra Translator",
+  "description": "A high-performance translation application powered by Gemini, featuring real-time language detection, high-fidelity text-to-speech, and a sleek, modern UI.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
